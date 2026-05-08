@@ -8,7 +8,10 @@ export async function listShops(req, res) {
       : req.user.companyId;
 
   const shops = await prisma.shop.findMany({
-    where: { companyId },
+    where: {
+      companyId,
+      isActive: true,
+    },
     orderBy: { createdAt: "desc" },
   });
 
@@ -50,4 +53,26 @@ export async function deactivateShop(req, res) {
   });
 
   res.json(shop);
+}
+
+export async function deleteShopPermanent(req, res) {
+  const { id } = req.params;
+  const shop = await prisma.shop.findUnique({
+    where: { id },
+    select: { id: true, isActive: true },
+  });
+
+  if (!shop) {
+    throw new ApiError("Loja não encontrada", 404);
+  }
+
+  if (shop.isActive) {
+    throw new ApiError("Desative a loja antes de excluir permanentemente", 409);
+  }
+
+  await prisma.shop.delete({
+    where: { id },
+  });
+
+  res.status(204).send();
 }

@@ -8,6 +8,7 @@ export async function listCosts(req, res) {
       : req.user.companyId;
   const where = {
     companyId,
+    isActive: true,
     ...(req.query.shopId ? { shopId: req.query.shopId } : {}),
     ...(req.query.plantationId ? { plantationId: req.query.plantationId } : {}),
     ...(req.query.nature ? { nature: req.query.nature } : {}),
@@ -56,4 +57,29 @@ export async function deactivateCost(req, res) {
   });
 
   res.json(cost);
+}
+
+export async function deleteCostPermanent(req, res) {
+  const { id } = req.params;
+  const cost = await prisma.cost.findUnique({
+    where: { id },
+    select: { id: true, isActive: true },
+  });
+
+  if (!cost) {
+    throw new ApiError("Custo não encontrado", 404);
+  }
+
+  if (cost.isActive) {
+    throw new ApiError(
+      "Desative o custo antes de excluir permanentemente",
+      409,
+    );
+  }
+
+  await prisma.cost.delete({
+    where: { id },
+  });
+
+  res.status(204).send();
 }

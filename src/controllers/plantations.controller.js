@@ -8,7 +8,10 @@ export async function listPlantations(req, res) {
       : req.user.companyId;
 
   const plantations = await prisma.plantation.findMany({
-    where: { companyId },
+    where: {
+      companyId,
+      isActive: true,
+    },
     orderBy: { createdAt: "desc" },
   });
 
@@ -54,4 +57,29 @@ export async function deactivatePlantation(req, res) {
   });
 
   res.json(plantation);
+}
+
+export async function deletePlantationPermanent(req, res) {
+  const { id } = req.params;
+  const plantation = await prisma.plantation.findUnique({
+    where: { id },
+    select: { id: true, isActive: true },
+  });
+
+  if (!plantation) {
+    throw new ApiError("Plantação não encontrada", 404);
+  }
+
+  if (plantation.isActive) {
+    throw new ApiError(
+      "Desative a plantação antes de excluir permanentemente",
+      409,
+    );
+  }
+
+  await prisma.plantation.delete({
+    where: { id },
+  });
+
+  res.status(204).send();
 }

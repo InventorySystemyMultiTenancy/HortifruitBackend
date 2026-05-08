@@ -4,6 +4,7 @@ import { validate } from "../middlewares/validate.js";
 import {
   createPlantation,
   deactivatePlantation,
+  deletePlantationPermanent,
   listPlantations,
   updatePlantation,
 } from "../controllers/plantations.controller.js";
@@ -30,5 +31,10 @@ router.patch(
   updatePlantation,
 );
 router.delete("/:id", authorizeRole("ADMIN"), deactivatePlantation);
+router.delete(
+  "/:id/permanent",
+  authorizeRole("ADMIN"),
+  deletePlantationPermanent,
+);
 
 export default router;

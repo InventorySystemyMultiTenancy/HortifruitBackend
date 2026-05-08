@@ -4,6 +4,7 @@ import { validate } from "../middlewares/validate.js";
 import {
   createShop,
   deactivateShop,
+  deleteShopPermanent,
   listShops,
   updateShop,
 } from "../controllers/shops.controller.js";
@@ -30,5 +31,6 @@ router.patch(
   updateShop,
 );
 router.delete("/:id", authorizeRole("ADMIN"), deactivateShop);
+router.delete("/:id/permanent", authorizeRole("ADMIN"), deleteShopPermanent);
 
 export default router;

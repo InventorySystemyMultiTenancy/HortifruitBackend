@@ -4,6 +4,7 @@ import { validate } from "../middlewares/validate.js";
 import {
   createCost,
   deactivateCost,
+  deleteCostPermanent,
   listCosts,
   updateCost,
 } from "../controllers/costs.controller.js";
@@ -30,5 +31,6 @@ router.patch(
   updateCost,
 );
 router.delete("/:id", authorizeRole("ADMIN"), deactivateCost);
+router.delete("/:id/permanent", authorizeRole("ADMIN"), deleteCostPermanent);
 
 export default router;
