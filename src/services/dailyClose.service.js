@@ -3,6 +3,9 @@ import { prisma } from "../config/prisma.js";
 import { ApiError } from "../utils/apiError.js";
 import { calculateFinalBalance } from "../utils/calculateFinalBalance.js";
 
+const AUDIT_MARKER = "[AUDIT_TRAIL_JSON]";
+const FLOAT_EPS = 0.000001;
+
 function decimal(value) {
   return new Prisma.Decimal(value || 0);
 }
@@ -27,6 +30,124 @@ function mapManualItems(items) {
 function closeDateValue(dateLike) {
   const date = new Date(dateLike);
   return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function parseNotesWithAudit(rawNotes) {
+  if (!rawNotes) {
+    return { userNotes: "", auditTrail: [] };
+  }
+
+  const markerIndex = rawNotes.indexOf(AUDIT_MARKER);
+
+  if (markerIndex === -1) {
+    return {
+      userNotes: rawNotes,
+      auditTrail: [],
+    };
+  }
+
+  const userNotes = rawNotes.slice(0, markerIndex).trimEnd();
+  const jsonChunk = rawNotes.slice(markerIndex + AUDIT_MARKER.length).trim();
+
+  try {
+    const parsed = JSON.parse(jsonChunk);
+    return {
+      userNotes,
+      auditTrail: Array.isArray(parsed) ? parsed : [],
+    };
+  } catch {
+    return {
+      userNotes,
+      auditTrail: [],
+    };
+  }
+}
+
+function composeNotesWithAudit(userNotes, auditTrail) {
+  const notes = (userNotes || "").trim();
+
+  if (!auditTrail?.length) {
+    return notes || null;
+  }
+
+  const json = JSON.stringify(auditTrail);
+
+  if (!notes) {
+    return `${AUDIT_MARKER}\n${json}`;
+  }
+
+  return `${notes}\n\n${AUDIT_MARKER}\n${json}`;
+}
+
+function snapshotByProduct(items = []) {
+  const snapshot = new Map();
+
+  for (const item of items) {
+    if (!item.productId) continue;
+
+    const current = snapshot.get(item.productId) || {
+      soldQuantity: 0,
+      lossQuantity: 0,
+      remainingQuantity: 0,
+    };
+
+    const quantity = asNumber(item.quantity);
+
+    if (item.kind === "VENDA") {
+      current.soldQuantity = quantity;
+    }
+
+    if (item.kind === "PERDA") {
+      current.lossQuantity = quantity;
+    }
+
+    if (item.kind === "ESTOQUE_FINAL") {
+      current.remainingQuantity = quantity;
+    }
+
+    snapshot.set(item.productId, current);
+  }
+
+  return snapshot;
+}
+
+function buildAuditChanges(beforeSnapshot, afterSnapshot) {
+  const productIds = new Set([
+    ...beforeSnapshot.keys(),
+    ...afterSnapshot.keys(),
+  ]);
+
+  const changes = [];
+
+  for (const productId of productIds) {
+    const before = beforeSnapshot.get(productId) || {
+      soldQuantity: 0,
+      lossQuantity: 0,
+      remainingQuantity: 0,
+    };
+    const after = afterSnapshot.get(productId) || {
+      soldQuantity: 0,
+      lossQuantity: 0,
+      remainingQuantity: 0,
+    };
+
+    const hasDifference =
+      Math.abs(before.soldQuantity - after.soldQuantity) > FLOAT_EPS ||
+      Math.abs(before.lossQuantity - after.lossQuantity) > FLOAT_EPS ||
+      Math.abs(before.remainingQuantity - after.remainingQuantity) > FLOAT_EPS;
+
+    if (!hasDifference) {
+      continue;
+    }
+
+    changes.push({
+      productId,
+      before,
+      after,
+    });
+  }
+
+  return changes;
 }
 
 async function getCurrentStockByProduct({ companyId, shopId, productIds }) {
@@ -299,7 +420,9 @@ export async function upsertDailyClose({ id, data, user }) {
   if (id) {
     const existing = await prisma.dailyClose.findUnique({
       where: { id },
-      select: { id: true, shopId: true, companyId: true, closeDate: true },
+      include: {
+        items: true,
+      },
     });
 
     if (!existing) {
@@ -313,6 +436,12 @@ export async function upsertDailyClose({ id, data, user }) {
       );
     }
 
+    const parsedExisting = parseNotesWithAudit(existing.notes);
+    const nextUserNotes =
+      data.notes !== undefined && data.notes !== null
+        ? String(data.notes)
+        : parsedExisting.userNotes;
+
     if (data.productEntries?.length) {
       const { closeItems, movementRows } =
         await buildProductClosePayloadForUpdate({
@@ -321,6 +450,24 @@ export async function upsertDailyClose({ id, data, user }) {
           productEntries: data.productEntries,
           existingCloseId: id,
         });
+
+      const beforeSnapshot = snapshotByProduct(existing.items);
+      const afterSnapshot = snapshotByProduct(closeItems);
+      const changes = buildAuditChanges(beforeSnapshot, afterSnapshot);
+      const nextAuditTrail = [
+        ...parsedExisting.auditTrail,
+        {
+          type: "UPDATE_PRODUCTS",
+          at: new Date().toISOString(),
+          actor: {
+            id: user.id,
+            name: user.name,
+            role: user.role,
+          },
+          changes,
+        },
+      ];
+      const nextNotes = composeNotesWithAudit(nextUserNotes, nextAuditTrail);
 
       const movementDate = closeDateValue(data.closeDate || existing.closeDate);
 
@@ -344,7 +491,7 @@ export async function upsertDailyClose({ id, data, user }) {
             sales: decimal(data.sales ?? 0),
             finalBalance: decimal(finalBalance),
             status: data.status,
-            notes: data.notes,
+            notes: nextNotes,
             closeDate: data.closeDate || undefined,
             items: {
               deleteMany: {},
@@ -378,6 +525,24 @@ export async function upsertDailyClose({ id, data, user }) {
       });
     }
 
+    const genericAuditTrail = [
+      ...parsedExisting.auditTrail,
+      {
+        type: "UPDATE_GENERAL",
+        at: new Date().toISOString(),
+        actor: {
+          id: user.id,
+          name: user.name,
+          role: user.role,
+        },
+        changes: [],
+      },
+    ];
+    const genericNotes = composeNotesWithAudit(
+      nextUserNotes,
+      genericAuditTrail,
+    );
+
     return prisma.dailyClose.update({
       where: { id },
       data: {
@@ -387,7 +552,7 @@ export async function upsertDailyClose({ id, data, user }) {
         sales: decimal(data.sales ?? 0),
         finalBalance: decimal(finalBalance),
         status: data.status,
-        notes: data.notes,
+        notes: genericNotes,
         closeDate: data.closeDate || undefined,
         items: mapManualItems(data.items),
       },
@@ -416,6 +581,23 @@ export async function upsertDailyClose({ id, data, user }) {
     productEntries: data.productEntries,
   });
 
+  const initialAuditTrail = data.productEntries?.length
+    ? [
+        {
+          type: "CREATE_PRODUCTS",
+          at: new Date().toISOString(),
+          actor: {
+            id: user.id,
+            name: user.name,
+            role: user.role,
+          },
+          changes: buildAuditChanges(new Map(), snapshotByProduct(closeItems)),
+        },
+      ]
+    : [];
+
+  const notesWithAudit = composeNotesWithAudit(data.notes, initialAuditTrail);
+
   const movementDate = closeDateValue(data.closeDate);
 
   return prisma.$transaction(async (tx) => {
@@ -429,7 +611,7 @@ export async function upsertDailyClose({ id, data, user }) {
         losses: decimal(data.losses ?? 0),
         sales: decimal(data.sales ?? 0),
         finalBalance: decimal(finalBalance),
-        notes: data.notes,
+        notes: notesWithAudit,
         createdById: user.id,
         items: closeItems?.length
           ? {
