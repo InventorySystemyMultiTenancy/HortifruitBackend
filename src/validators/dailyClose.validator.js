@@ -1,6 +1,14 @@
 import { z } from "zod";
 
 const amount = z.coerce.number().nonnegative();
+const quantity = z.coerce.number().nonnegative();
+
+const productEntrySchema = z.object({
+  productId: z.string().min(1),
+  soldQuantity: quantity.default(0),
+  lossQuantity: quantity.default(0),
+  remainingQuantity: quantity.optional().nullable(),
+});
 
 export const dailyCloseQuerySchema = z.object({
   query: z.object({
@@ -32,6 +40,7 @@ export const createDailyCloseSchema = z.object({
         }),
       )
       .optional(),
+    productEntries: z.array(productEntrySchema).optional(),
   }),
 });
 
@@ -57,5 +66,6 @@ export const updateDailyCloseSchema = z.object({
         }),
       )
       .optional(),
+    productEntries: z.array(productEntrySchema).optional(),
   }),
 });
