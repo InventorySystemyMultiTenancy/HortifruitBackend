@@ -6,7 +6,7 @@ export function calculateFinalBalance({
 }) {
   return (
     Number(openingAmount) +
-    Number(replenishment) -
+    Number(replenishment) +
     Number(sales) -
     Number(losses)
   );
