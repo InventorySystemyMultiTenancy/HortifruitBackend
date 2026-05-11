@@ -19,17 +19,41 @@ function buildDateRange({ startDate, endDate, month }) {
   return { startDate: start, endDate: end };
 }
 
+function getMonthBounds(date) {
+  return {
+    startsAt: startOfDay(new Date(date.getFullYear(), date.getMonth(), 1)),
+    endsAt: endOfDay(new Date(date.getFullYear(), date.getMonth() + 1, 0)),
+  };
+}
+
+function resolveCostWindow(cost) {
+  if (cost.startsAt || cost.endsAt) {
+    return {
+      startsAt: cost.startsAt || cost.dueDate || cost.createdAt,
+      endsAt: cost.endsAt || cost.dueDate || cost.createdAt,
+    };
+  }
+
+  if (cost.nature === "FIXED" && cost.dueDate) {
+    return getMonthBounds(cost.dueDate);
+  }
+
+  const referenceDate = cost.dueDate || cost.createdAt;
+  return {
+    startsAt: referenceDate,
+    endsAt: referenceDate,
+  };
+}
+
 function overlapsDay(cost, day) {
   const dayStart = startOfDay(day);
   const dayEnd = endOfDay(day);
-  const startsAt = cost.startsAt || cost.dueDate || cost.createdAt;
-  const endsAt = cost.endsAt || cost.dueDate || cost.createdAt;
+  const { startsAt, endsAt } = resolveCostWindow(cost);
   return startsAt <= dayEnd && endsAt >= dayStart;
 }
 
 function overlapsRange(cost, rangeStart, rangeEnd) {
-  const startsAt = cost.startsAt || cost.dueDate || cost.createdAt;
-  const endsAt = cost.endsAt || cost.dueDate || cost.createdAt;
+  const { startsAt, endsAt } = resolveCostWindow(cost);
   return startsAt <= rangeEnd && endsAt >= rangeStart;
 }
 
