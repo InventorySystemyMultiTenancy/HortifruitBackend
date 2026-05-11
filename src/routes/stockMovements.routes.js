@@ -7,7 +7,6 @@ import {
   listStockMovements,
   updateStockMovement,
   getShopStockBalance,
-  registerSaleOrLoss,
   getShopStockSummary,
 } from "../controllers/stockMovements.controller.js";
 import {
@@ -36,25 +35,6 @@ router.get(
   "/summary/:shopId",
   validate(z.object({ params: z.object({ shopId: z.string() }) })),
   getShopStockSummary,
-);
-
-// Novo: POST para registrar venda/desperdício com custo automático
-router.post(
-  "/register-sale",
-  validate(
-    z.object({
-      body: z.object({
-        productId: z.string(),
-        shopId: z.string().optional(),
-        quantity: z.number().positive(),
-        type: z.enum(["venda", "desperdicio"]),
-        unitCost: z.number().optional(),
-        notes: z.string().optional(),
-        movementDate: z.string().optional(),
-      }),
-    }),
-  ),
-  registerSaleOrLoss,
 );
 
 router.patch(
