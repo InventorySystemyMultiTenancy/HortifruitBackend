@@ -103,6 +103,11 @@ export async function buildReport({
     (sum, item) => sum + Number(item.sales),
     0,
   );
+  const lossesTotal = dailyCloses.reduce(
+    (sum, item) => sum + Number(item.losses || 0),
+    0,
+  );
+  const netRevenue = grossRevenue - lossesTotal;
   const dailyCosts = eachDayInRange(range.startDate, range.endDate).map(
     (day) => {
       let fixed = 0;
@@ -167,6 +172,8 @@ export async function buildReport({
       month: month || null,
     },
     grossRevenue,
+    lossesTotal,
+    netRevenue,
     costs: {
       fixedRateado: fixedCostsRateado,
       variable: variableCosts,
@@ -174,7 +181,7 @@ export async function buildReport({
       total: totalCosts,
       daily: dailyCosts,
     },
-    netResult: grossRevenue - totalCosts,
+    netResult: netRevenue - totalCosts,
     closes: dailyCloses,
   };
 }
