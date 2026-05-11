@@ -6,6 +6,10 @@ function decimal(value) {
   return new Prisma.Decimal(value || 0);
 }
 
+function stockEntryCostMarker(movementId) {
+  return `AUTO_STOCK_ENTRY_COST:${movementId}`;
+}
+
 export async function listStockMovements(req, res) {
   const companyId = req.user.companyId;
   const query = req.validated.query;
@@ -53,22 +57,47 @@ export async function createStockMovement(req, res) {
     );
   }
 
-  const movement = await prisma.stockMovement.create({
-    data: {
-      companyId,
-      productId: body.productId,
-      plantationId: body.plantationId || null,
-      shopId,
-      quantity: decimal(body.quantity),
-      unitCost: body.unitCost == null ? null : decimal(body.unitCost),
-      movementDate: body.movementDate,
-      notes: body.notes,
-    },
-    include: {
-      product: true,
-      plantation: true,
-      shop: true,
-    },
+  const movement = await prisma.$transaction(async (tx) => {
+    const createdMovement = await tx.stockMovement.create({
+      data: {
+        companyId,
+        productId: body.productId,
+        plantationId: body.plantationId || null,
+        shopId,
+        quantity: decimal(body.quantity),
+        unitCost: body.unitCost == null ? null : decimal(body.unitCost),
+        movementDate: body.movementDate,
+        notes: body.notes,
+      },
+      include: {
+        product: true,
+        plantation: true,
+        shop: true,
+      },
+    });
+
+    if (body.unitCost != null) {
+      const quantity = decimal(body.quantity);
+      const unitCost = decimal(body.unitCost);
+      const totalCost = quantity.mul(unitCost);
+      const marker = stockEntryCostMarker(createdMovement.id);
+
+      await tx.cost.create({
+        data: {
+          companyId,
+          shopId,
+          plantationId: body.plantationId || null,
+          name: `Custo de entrada: ${createdMovement.product.name}`,
+          nature: "VARIABLE",
+          scope: shopId ? "SHOP" : "COMPANY",
+          amount: totalCost,
+          dueDate: createdMovement.movementDate,
+          notes: `${marker} | Calculado automaticamente: ${body.quantity} x ${body.unitCost}`,
+        },
+      });
+    }
+
+    return createdMovement;
   });
 
   res.status(201).json(movement);
@@ -108,8 +137,19 @@ export async function updateStockMovement(req, res) {
 export async function deleteStockMovement(req, res) {
   const { id } = req.params;
 
-  await prisma.stockMovement.delete({
-    where: { id },
+  await prisma.$transaction(async (tx) => {
+    await tx.stockMovement.delete({
+      where: { id },
+    });
+
+    await tx.cost.deleteMany({
+      where: {
+        companyId: req.user.companyId,
+        notes: {
+          startsWith: stockEntryCostMarker(id),
+        },
+      },
+    });
   });
 
   res.status(204).send();
