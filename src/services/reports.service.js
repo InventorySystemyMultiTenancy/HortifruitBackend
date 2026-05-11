@@ -57,6 +57,20 @@ function overlapsRange(cost, rangeStart, rangeEnd) {
   return startsAt <= rangeEnd && endsAt >= rangeStart;
 }
 
+function getCostDailyAmount(cost, day) {
+  if (!overlapsDay(cost, day)) {
+    return 0;
+  }
+
+  if (cost.nature === "FIXED") {
+    return Number(cost.amount) / getDaysInMonth(day);
+  }
+
+  const { startsAt, endsAt } = resolveCostWindow(cost);
+  const spanDays = Math.max(eachDayInRange(startsAt, endsAt).length, 1);
+  return Number(cost.amount) / spanDays;
+}
+
 export async function buildReport({
   companyId,
   shopId,
@@ -89,33 +103,58 @@ export async function buildReport({
     (sum, item) => sum + Number(item.sales),
     0,
   );
-  const variableCosts = costs
-    .filter(
-      (item) =>
-        item.nature === "VARIABLE" &&
-        overlapsRange(item, range.startDate, range.endDate),
-    )
-    .reduce((sum, item) => sum + Number(item.amount), 0);
-  const plantationCosts = costs
-    .filter(
-      (item) =>
-        item.scope === "PLANTATION" &&
-        overlapsRange(item, range.startDate, range.endDate),
-    )
-    .reduce((sum, item) => sum + Number(item.amount), 0);
+  const dailyCosts = eachDayInRange(range.startDate, range.endDate).map(
+    (day) => {
+      let fixed = 0;
+      let variable = 0;
+      let plantation = 0;
 
-  const fixedCosts = costs.filter((item) => item.nature === "FIXED");
-  let fixedCostsRateado = 0;
+      for (const cost of costs) {
+        if (!overlapsRange(cost, range.startDate, range.endDate)) {
+          continue;
+        }
 
-  for (const day of eachDayInRange(range.startDate, range.endDate)) {
-    const daysInMonth = getDaysInMonth(day);
+        const dailyAmount = getCostDailyAmount(cost, day);
 
-    for (const cost of fixedCosts) {
-      if (overlapsDay(cost, day)) {
-        fixedCostsRateado += Number(cost.amount) / daysInMonth;
+        if (dailyAmount === 0) {
+          continue;
+        }
+
+        if (cost.nature === "FIXED") {
+          fixed += dailyAmount;
+        }
+
+        if (cost.nature === "VARIABLE") {
+          variable += dailyAmount;
+        }
+
+        if (cost.scope === "PLANTATION") {
+          plantation += dailyAmount;
+        }
       }
-    }
-  }
+
+      return {
+        date: startOfDay(day),
+        fixed,
+        variable,
+        plantation,
+        total: fixed + variable + plantation,
+      };
+    },
+  );
+
+  const fixedCostsRateado = dailyCosts.reduce(
+    (sum, item) => sum + item.fixed,
+    0,
+  );
+  const variableCosts = dailyCosts.reduce(
+    (sum, item) => sum + item.variable,
+    0,
+  );
+  const plantationCosts = dailyCosts.reduce(
+    (sum, item) => sum + item.plantation,
+    0,
+  );
 
   const totalCosts = fixedCostsRateado + variableCosts + plantationCosts;
 
@@ -133,6 +172,7 @@ export async function buildReport({
       variable: variableCosts,
       plantation: plantationCosts,
       total: totalCosts,
+      daily: dailyCosts,
     },
     netResult: grossRevenue - totalCosts,
     closes: dailyCloses,
