@@ -74,6 +74,7 @@ function getCostDailyAmount(cost, day) {
 export async function buildReport({
   companyId,
   shopId,
+  plantationId,
   startDate,
   endDate,
   month,
@@ -84,6 +85,7 @@ export async function buildReport({
     where: {
       companyId,
       ...(shopId ? { shopId } : {}),
+      ...(plantationId ? { plantationId } : {}),
       closeDate: {
         gte: range.startDate,
         lte: range.endDate,
@@ -91,13 +93,33 @@ export async function buildReport({
     },
   });
 
-  const costs = await prisma.cost.findMany({
-    where: {
-      companyId,
-      isActive: true,
-      ...(shopId ? { OR: [{ shopId }, { shopId: null }] } : {}),
-    },
-  });
+  let costs;
+  if (shopId) {
+    costs = await prisma.cost.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        scope: "SHOP",
+        shopId,
+      },
+    });
+  } else if (plantationId) {
+    costs = await prisma.cost.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        scope: "PLANTATION",
+        plantationId,
+      },
+    });
+  } else {
+    costs = await prisma.cost.findMany({
+      where: {
+        companyId,
+        isActive: true,
+      },
+    });
+  }
 
   const grossRevenue = dailyCloses.reduce(
     (sum, item) => sum + Number(item.sales),
