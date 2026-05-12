@@ -6,11 +6,13 @@ export async function getReport(req, res) {
       ? req.query.companyId || req.user.companyId
       : req.user.companyId;
   const query = req.validated.query;
-  const shopId = req.user.role === "ADMIN" ? query.shopId : req.user.shopId;
+  const workerShopIds = req.user.role === "ADMIN" ? [] : req.user.shopIds || [];
+  const shopId = req.user.role === "ADMIN" ? query.shopId : undefined;
 
   const report = await buildReport({
     companyId,
     shopId,
+    shopIds: workerShopIds,
     startDate: query.startDate,
     endDate: query.endDate,
     month: query.month,

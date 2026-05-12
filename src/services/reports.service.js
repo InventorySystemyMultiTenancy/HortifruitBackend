@@ -74,17 +74,23 @@ function getCostDailyAmount(cost, day) {
 export async function buildReport({
   companyId,
   shopId,
+  shopIds,
   plantationId,
   startDate,
   endDate,
   month,
 }) {
   const range = buildDateRange({ startDate, endDate, month });
+  const scopedShopFilter = shopId
+    ? { shopId }
+    : Array.isArray(shopIds) && shopIds.length
+      ? { shopId: { in: shopIds } }
+      : {};
 
   const dailyCloses = await prisma.dailyClose.findMany({
     where: {
       companyId,
-      ...(shopId ? { shopId } : {}),
+      ...scopedShopFilter,
       ...(plantationId ? { plantationId } : {}),
       closeDate: {
         gte: range.startDate,
@@ -94,13 +100,13 @@ export async function buildReport({
   });
 
   let costs;
-  if (shopId) {
+  if (shopId || (Array.isArray(shopIds) && shopIds.length)) {
     costs = await prisma.cost.findMany({
       where: {
         companyId,
         isActive: true,
         scope: "SHOP",
-        shopId,
+        ...(shopId ? { shopId } : { shopId: { in: shopIds } }),
       },
     });
   } else if (plantationId) {

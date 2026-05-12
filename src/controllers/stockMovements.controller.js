@@ -13,12 +13,18 @@ function stockEntryCostMarker(movementId) {
 export async function listStockMovements(req, res) {
   const companyId = req.user.companyId;
   const query = req.validated.query;
-  const shopId = req.user.role === "ADMIN" ? query.shopId : req.user.shopId;
+  const workerShopIds = req.user.shopIds || [];
 
   const stockMoves = await prisma.stockMovement.findMany({
     where: {
       companyId,
-      ...(shopId ? { shopId } : {}),
+      ...(req.user.role === "ADMIN"
+        ? query.shopId
+          ? { shopId: query.shopId }
+          : {}
+        : workerShopIds.length
+          ? { shopId: { in: workerShopIds } }
+          : { shopId: "__NO_WORKER_SHOP__" }),
       ...(query.plantationId ? { plantationId: query.plantationId } : {}),
       ...(query.startDate || query.endDate
         ? {
@@ -44,17 +50,18 @@ export async function createStockMovement(req, res) {
   const body = req.validated.body;
   const companyId = body.companyId || req.user.companyId;
   const shopId =
-    req.user.role === "ADMIN" ? body.shopId || null : req.user.shopId;
+    req.user.role === "ADMIN"
+      ? body.shopId || null
+      : body.shopId || req.user.shopId;
 
-  if (
-    req.user.role !== "ADMIN" &&
-    body.shopId &&
-    body.shopId !== req.user.shopId
-  ) {
-    throw new ApiError(
-      "Funcionário só pode lançar movimentação para a própria loja",
-      403,
-    );
+  if (req.user.role !== "ADMIN") {
+    const workerShopIds = req.user.shopIds || [];
+    if (!shopId || !workerShopIds.includes(shopId)) {
+      throw new ApiError(
+        "Funcionário só pode lançar movimentação para loja vinculada",
+        403,
+      );
+    }
   }
 
   const movement = await prisma.$transaction(async (tx) => {
@@ -162,9 +169,17 @@ export async function deleteStockMovement(req, res) {
 export async function getShopStockBalance(req, res) {
   const { shopId } = req.validated.params;
   const companyId = req.user.companyId;
+  const targetShopId =
+    req.user.role === "ADMIN" ? shopId : shopId || req.user.shopId;
 
-  // Validar acesso
-  if (req.user.role !== "ADMIN" && shopId !== req.user.shopId) {
+  if (!targetShopId) {
+    throw new ApiError("Funcionário sem loja vinculada", 403);
+  }
+
+  if (
+    req.user.role !== "ADMIN" &&
+    !(req.user.shopIds || []).includes(targetShopId)
+  ) {
     throw new ApiError("Sem permissão para visualizar esta loja", 403);
   }
 
@@ -173,7 +188,7 @@ export async function getShopStockBalance(req, res) {
     by: ["productId"],
     where: {
       companyId,
-      shopId,
+      shopId: targetShopId,
     },
     _sum: {
       quantity: true,
@@ -205,17 +220,17 @@ export async function getShopStockBalance(req, res) {
 export async function registerSaleOrLoss(req, res) {
   const body = req.validated.body;
   const companyId = req.user.companyId;
-  const shopId = req.user.role === "ADMIN" ? body.shopId : req.user.shopId;
+  const shopId =
+    req.user.role === "ADMIN" ? body.shopId : body.shopId || req.user.shopId;
 
-  if (
-    req.user.role !== "ADMIN" &&
-    body.shopId &&
-    body.shopId !== req.user.shopId
-  ) {
-    throw new ApiError(
-      "Funcionário só pode registrar movimentação para a própria loja",
-      403,
-    );
+  if (req.user.role !== "ADMIN") {
+    const workerShopIds = req.user.shopIds || [];
+    if (!shopId || !workerShopIds.includes(shopId)) {
+      throw new ApiError(
+        "Funcionário só pode registrar movimentação para loja vinculada",
+        403,
+      );
+    }
   }
 
   // Validar estoque disponível
@@ -291,8 +306,17 @@ export async function registerSaleOrLoss(req, res) {
 export async function getShopStockSummary(req, res) {
   const { shopId } = req.validated.params;
   const companyId = req.user.companyId;
+  const targetShopId =
+    req.user.role === "ADMIN" ? shopId : shopId || req.user.shopId;
 
-  if (req.user.role !== "ADMIN" && shopId !== req.user.shopId) {
+  if (!targetShopId) {
+    throw new ApiError("Funcionário sem loja vinculada", 403);
+  }
+
+  if (
+    req.user.role !== "ADMIN" &&
+    !(req.user.shopIds || []).includes(targetShopId)
+  ) {
     throw new ApiError("Sem permissão para visualizar esta loja", 403);
   }
 
@@ -300,7 +324,7 @@ export async function getShopStockSummary(req, res) {
   const movements = await prisma.stockMovement.findMany({
     where: {
       companyId,
-      shopId,
+      shopId: targetShopId,
     },
     include: {
       product: true,
@@ -327,7 +351,7 @@ export async function getShopStockSummary(req, res) {
   const summary = Object.values(groupedByProduct);
 
   res.json({
-    shopId,
+    shopId: targetShopId,
     totalProducts: summary.length,
     products: summary,
   });

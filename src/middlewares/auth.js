@@ -22,6 +22,11 @@ export async function authenticate(req, _res, next) {
       companyId: true,
       shopId: true,
       isActive: true,
+      shopLinks: {
+        select: {
+          shopId: true,
+        },
+      },
     },
   });
 
@@ -29,7 +34,17 @@ export async function authenticate(req, _res, next) {
     throw new ApiError("Usuário inválido ou inativo", 401);
   }
 
-  req.user = user;
+  const shopIds = [
+    ...new Set([
+      ...(user.shopId ? [user.shopId] : []),
+      ...user.shopLinks.map((item) => item.shopId),
+    ]),
+  ];
+
+  req.user = {
+    ...user,
+    shopIds,
+  };
   next();
 }
 

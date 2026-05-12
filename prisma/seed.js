@@ -102,7 +102,7 @@ async function main() {
     },
   });
 
-  await prisma.user.upsert({
+  const workerUser = await prisma.user.upsert({
     where: { email: "funcionario@hortifruit.com" },
     update: {
       name: "Funcionário Loja Centro",
@@ -120,6 +120,17 @@ async function main() {
       shopId: lojaCentro.id,
       passwordHash: workerPassword,
       isActive: true,
+    },
+  });
+
+  await prisma.userShopAssignment.deleteMany({
+    where: { userId: workerUser.id },
+  });
+
+  await prisma.userShopAssignment.create({
+    data: {
+      userId: workerUser.id,
+      shopId: lojaCentro.id,
     },
   });
 

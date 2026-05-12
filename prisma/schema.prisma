@@ -51,43 +51,57 @@ model Company {
 }
 
 model User {
-  id           String      @id @default(cuid())
+  id           String               @id @default(cuid())
   companyId    String
   shopId       String?
   name         String
-  email        String      @unique
+  email        String               @unique
   passwordHash String
-  role         UserRole    @default(WORKER)
-  isActive     Boolean     @default(true)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  role         UserRole             @default(WORKER)
+  isActive     Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
 
-  company      Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  shop         Shop?       @relation(fields: [shopId], references: [id], onDelete: SetNull)
-  createdDailyCloses DailyClose[] @relation("DailyCloseCreatedBy")
+  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  shop         Shop?                @relation(fields: [shopId], references: [id], onDelete: SetNull)
+  shopLinks    UserShopAssignment[]
+  createdDailyCloses DailyClose[]   @relation("DailyCloseCreatedBy")
 
   @@index([companyId])
   @@index([shopId])
 }
 
 model Shop {
-  id           String      @id @default(cuid())
+  id           String               @id @default(cuid())
   companyId    String
   name         String
   code         String?
   city         String?
-  isActive     Boolean     @default(true)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  isActive     Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
 
-  company      Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   workers      User[]
+  workerLinks  UserShopAssignment[]
   stockMoves   StockMovement[]
   dailyCloses  DailyClose[]
   costs        Cost[]
 
   @@unique([companyId, name])
   @@index([companyId])
+}
+
+model UserShopAssignment {
+  userId    String
+  shopId    String
+  createdAt DateTime @default(now())
+
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shop      Shop   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@id([userId, shopId])
+  @@index([shopId])
 }
 
 model Plantation {

@@ -8,10 +8,16 @@ export async function listDailyCloses(req, res) {
       ? req.query.companyId || req.user.companyId
       : req.user.companyId;
   const query = req.validated.query;
-  const shopId = req.user.role === "ADMIN" ? query.shopId : req.user.shopId;
+  const workerShopIds = req.user.shopIds || [];
   const where = {
     companyId,
-    ...(shopId ? { shopId } : {}),
+    ...(req.user.role === "ADMIN"
+      ? query.shopId
+        ? { shopId: query.shopId }
+        : {}
+      : workerShopIds.length
+        ? { shopId: { in: workerShopIds } }
+        : { shopId: "__NO_WORKER_SHOP__" }),
     ...(query.startDate || query.endDate
       ? {
           closeDate: {
@@ -63,7 +69,10 @@ export async function getDailyCloseById(req, res) {
     throw new ApiError("Fechamento não encontrado", 404);
   }
 
-  if (req.user.role !== "ADMIN" && dailyClose.shopId !== req.user.shopId) {
+  if (
+    req.user.role !== "ADMIN" &&
+    !(req.user.shopIds || []).includes(dailyClose.shopId)
+  ) {
     throw new ApiError("Sem permissão para visualizar este fechamento", 403);
   }
 

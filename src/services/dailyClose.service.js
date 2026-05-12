@@ -408,13 +408,17 @@ async function buildProductClosePayloadForUpdate({
 export async function upsertDailyClose({ id, data, user }) {
   const finalBalance = data.finalBalance ?? calculateFinalBalance(data);
   const companyId = data.companyId || user.companyId;
-  const shopId = user.role === "ADMIN" ? data.shopId : user.shopId;
+  const workerShopIds = user.shopIds || [];
+  const shopId =
+    user.role === "ADMIN" ? data.shopId : data.shopId || user.shopId;
 
-  if (user.role !== "ADMIN" && data.shopId && data.shopId !== user.shopId) {
-    throw new ApiError(
-      "Funcionário só pode lançar fechamento na própria loja",
-      403,
-    );
+  if (user.role !== "ADMIN") {
+    if (!shopId || !workerShopIds.includes(shopId)) {
+      throw new ApiError(
+        "Funcionário só pode lançar fechamento em loja vinculada",
+        403,
+      );
+    }
   }
 
   if (id) {
@@ -429,9 +433,12 @@ export async function upsertDailyClose({ id, data, user }) {
       throw new ApiError("Fechamento não encontrado", 404);
     }
 
-    if (user.role !== "ADMIN" && existing.shopId !== user.shopId) {
+    if (
+      user.role !== "ADMIN" &&
+      !(user.shopIds || []).includes(existing.shopId)
+    ) {
       throw new ApiError(
-        "Funcionário só pode alterar o fechamento da própria loja",
+        "Funcionário só pode alterar fechamento de loja vinculada",
         403,
       );
     }

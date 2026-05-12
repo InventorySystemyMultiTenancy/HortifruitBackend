@@ -60,6 +60,15 @@ CREATE TABLE "Shop" (
 );
 
 -- CreateTable
+CREATE TABLE "UserShopAssignment" (
+    "userId" TEXT NOT NULL,
+    "shopId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "UserShopAssignment_pkey" PRIMARY KEY ("userId","shopId")
+);
+
+-- CreateTable
 CREATE TABLE "Plantation" (
     "id" TEXT NOT NULL,
     "companyId" TEXT NOT NULL,
@@ -173,6 +182,9 @@ CREATE INDEX "User_companyId_idx" ON "User"("companyId");
 CREATE INDEX "User_shopId_idx" ON "User"("shopId");
 
 -- CreateIndex
+CREATE INDEX "UserShopAssignment_shopId_idx" ON "UserShopAssignment"("shopId");
+
+-- CreateIndex
 CREATE INDEX "Shop_companyId_idx" ON "Shop"("companyId");
 
 -- CreateIndex
@@ -222,6 +234,12 @@ ALTER TABLE "User" ADD CONSTRAINT "User_companyId_fkey" FOREIGN KEY ("companyId"
 
 -- AddForeignKey
 ALTER TABLE "User" ADD CONSTRAINT "User_shopId_fkey" FOREIGN KEY ("shopId") REFERENCES "Shop"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "UserShopAssignment" ADD CONSTRAINT "UserShopAssignment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "UserShopAssignment" ADD CONSTRAINT "UserShopAssignment_shopId_fkey" FOREIGN KEY ("shopId") REFERENCES "Shop"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Shop" ADD CONSTRAINT "Shop_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE CASCADE ON UPDATE CASCADE;

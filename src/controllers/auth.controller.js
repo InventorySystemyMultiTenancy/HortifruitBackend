@@ -8,6 +8,13 @@ export async function login(req, res) {
 
   const user = await prisma.user.findUnique({
     where: { email },
+    include: {
+      shopLinks: {
+        select: {
+          shopId: true,
+        },
+      },
+    },
   });
 
   if (!user || !user.isActive) {
@@ -19,6 +26,8 @@ export async function login(req, res) {
   if (!isValid) {
     throw new ApiError("Credenciais inválidas", 401);
   }
+
+  const shopIds = user.shopLinks.map((item) => item.shopId);
 
   const token = signToken({
     sub: user.id,
@@ -36,6 +45,7 @@ export async function login(req, res) {
       role: user.role,
       companyId: user.companyId,
       shopId: user.shopId,
+      shopIds,
     },
   });
 }
