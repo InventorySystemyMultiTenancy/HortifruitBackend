@@ -22,7 +22,7 @@ function buildChatPrompt({ message, context, user }) {
     : "Usuario: anonimo";
   const contextText = normalizeContext(context);
 
-  return `Voce e um assistente inteligente para o sistema Hortifruit. Responda em pt-BR, com objetividade e foco em operacoes do negocio.\n\n${userContext}\nContexto adicional: ${contextText || "(vazio)"}\n\nPergunta do usuario: ${message}`;
+  return `Voce e um assistente inteligente para o sistema Hortifruit. Responda em pt-BR, com objetividade e foco em operacoes do negocio. Considere que estamos no Brasil e use as definicoes de estacoes do ano brasileiras. Seja especifico ao sugerir frutas, legumes e verduras para cultivo em cada estacao, citando exemplos claros quando a pergunta envolver sazonalidade.\n\n${userContext}\nContexto adicional: ${contextText || "(vazio)"}\n\nPergunta do usuario: ${message}`;
 }
 
 async function callOpenAi({ prompt }) {
