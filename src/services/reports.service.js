@@ -335,6 +335,26 @@ async function getDailyCloseItems({
   });
 }
 
+async function getLatestCloseDate({
+  companyId,
+  shopId,
+  shopIds,
+  beforeDate,
+}) {
+  const scopedShopFilter = buildScopedShopFilter({ shopId, shopIds });
+  const latest = await prisma.dailyClose.findFirst({
+    where: {
+      companyId,
+      ...scopedShopFilter,
+      ...(beforeDate ? { closeDate: { lte: beforeDate } } : {}),
+    },
+    orderBy: { closeDate: "desc" },
+    select: { closeDate: true },
+  });
+
+  return latest?.closeDate || null;
+}
+
 function aggregateProductStats(closes) {
   const stats = new Map();
 
@@ -492,44 +512,122 @@ export async function buildAiReport({
   region,
 }) {
   const referenceDate = date ? new Date(date) : new Date();
-  const monthValue = month || formatYearMonth(referenceDate);
-  const todayStart = startOfDay(referenceDate);
-  const todayEnd = endOfDay(referenceDate);
-  const monthRange = buildDateRange({ month: monthValue });
+  let effectiveDate = referenceDate;
+  let monthValue = month || formatYearMonth(referenceDate);
+  let todayStart = startOfDay(referenceDate);
+  let todayEnd = endOfDay(referenceDate);
+  let monthRange = buildDateRange({ month: monthValue });
 
-  const [todayReport, monthReport, todayCloses, monthCloses, costs] =
-    await Promise.all([
-      buildReport({
-        companyId,
-        shopId,
-        shopIds,
-        plantationId,
-        startDate: todayStart,
-        endDate: todayEnd,
-      }),
-      buildReport({
-        companyId,
-        shopId,
-        shopIds,
-        plantationId,
-        month: monthValue,
-      }),
-      getDailyCloseItems({
-        companyId,
-        shopId,
-        shopIds,
-        startDate: todayStart,
-        endDate: todayEnd,
-      }),
-      getDailyCloseItems({
-        companyId,
-        shopId,
-        shopIds,
-        startDate: monthRange.startDate,
-        endDate: monthRange.endDate,
-      }),
-      getCostsForScope({ companyId, shopId, shopIds, plantationId }),
-    ]);
+  const costs = await getCostsForScope({
+    companyId,
+    shopId,
+    shopIds,
+    plantationId,
+  });
+
+  let [todayReport, todayCloses] = await Promise.all([
+    buildReport({
+      companyId,
+      shopId,
+      shopIds,
+      plantationId,
+      startDate: todayStart,
+      endDate: todayEnd,
+    }),
+    getDailyCloseItems({
+      companyId,
+      shopId,
+      shopIds,
+      startDate: todayStart,
+      endDate: todayEnd,
+    }),
+  ]);
+
+  if (!todayCloses.length) {
+    const latestClose = await getLatestCloseDate({
+      companyId,
+      shopId,
+      shopIds,
+      beforeDate: todayEnd,
+    });
+
+    if (latestClose) {
+      effectiveDate = latestClose;
+      todayStart = startOfDay(latestClose);
+      todayEnd = endOfDay(latestClose);
+
+      [todayReport, todayCloses] = await Promise.all([
+        buildReport({
+          companyId,
+          shopId,
+          shopIds,
+          plantationId,
+          startDate: todayStart,
+          endDate: todayEnd,
+        }),
+        getDailyCloseItems({
+          companyId,
+          shopId,
+          shopIds,
+          startDate: todayStart,
+          endDate: todayEnd,
+        }),
+      ]);
+
+      if (!month) {
+        monthValue = formatYearMonth(latestClose);
+        monthRange = buildDateRange({ month: monthValue });
+      }
+    }
+  }
+
+  let [monthReport, monthCloses] = await Promise.all([
+    buildReport({
+      companyId,
+      shopId,
+      shopIds,
+      plantationId,
+      month: monthValue,
+    }),
+    getDailyCloseItems({
+      companyId,
+      shopId,
+      shopIds,
+      startDate: monthRange.startDate,
+      endDate: monthRange.endDate,
+    }),
+  ]);
+
+  if (!monthCloses.length) {
+    const latestClose = await getLatestCloseDate({
+      companyId,
+      shopId,
+      shopIds,
+      beforeDate: monthRange.endDate,
+    });
+
+    if (latestClose) {
+      monthValue = formatYearMonth(latestClose);
+      monthRange = buildDateRange({ month: monthValue });
+
+      [monthReport, monthCloses] = await Promise.all([
+        buildReport({
+          companyId,
+          shopId,
+          shopIds,
+          plantationId,
+          month: monthValue,
+        }),
+        getDailyCloseItems({
+          companyId,
+          shopId,
+          shopIds,
+          startDate: monthRange.startDate,
+          endDate: monthRange.endDate,
+        }),
+      ]);
+    }
+  }
 
   const todayProducts = aggregateProductStats(todayCloses).slice(0, 10);
   const monthProducts = aggregateProductStats(monthCloses).slice(0, 15);
@@ -575,6 +673,8 @@ export async function buildAiReport({
       date: todayStart,
       month: monthValue,
       region: region || "Brasil",
+      effectiveDate,
+      effectiveMonth: monthValue,
     },
     summary: {
       today: todaySummary,
