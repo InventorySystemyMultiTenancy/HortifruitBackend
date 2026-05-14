@@ -67,7 +67,7 @@ function buildChatPrompt({ message, context, user, autoContext }) {
   const regionText = temporal.region || "Brasil";
   const autoContextText = normalizeContext(autoContext);
 
-  return `Voce e um assistente inteligente para o sistema Hortifruit. Responda em pt-BR, com objetividade e foco em operacoes do negocio. Considere que estamos no Brasil e use as definicoes de estacoes do ano brasileiras. Seja especifico ao sugerir frutas, legumes e verduras para cultivo em cada estacao, citando exemplos claros quando a pergunta envolver sazonalidade.\n\nData de referencia: ${dateText}\nRegiao: ${regionText}\n${userContext}\nContexto adicional: ${contextText || "(vazio)"}\nDados internos (JSON): ${autoContextText || "(vazio)"}\n\nPergunta do usuario: ${message}`;
+  return `Voce e um assistente inteligente para o sistema Hortifruit. Responda em pt-BR, com objetividade e foco em operacoes do negocio. Considere que estamos no Brasil e use as definicoes de estacoes do ano brasileiras. Seja especifico ao sugerir frutas, legumes e verduras para cultivo em cada estacao, citando exemplos claros quando a pergunta envolver sazonalidade.\n\nInterpretacao dos dados internos:\n- "sales" e "losses" sao valores monetarios (R$), nao quantidade de itens.\n- "shipmentsByShopMonth.quantity" e quantidade enviada (unidade do produto), nao valor em dinheiro.\n- "closings" e quantidade de fechamentos diarios registrados.\n\nData de referencia: ${dateText}\nRegiao: ${regionText}\n${userContext}\nContexto adicional: ${contextText || "(vazio)"}\nDados internos (JSON): ${autoContextText || "(vazio)"}\n\nPergunta do usuario: ${message}`;
 }
 
 async function buildAutoContext({ user, referenceDate }) {
