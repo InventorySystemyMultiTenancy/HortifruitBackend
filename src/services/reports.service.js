@@ -401,6 +401,37 @@ function buildAiPrompt({
   )}\n\nRegras:\n- Responda SOMENTE com JSON valido.\n- Se nao houver dados suficientes, diga explicitamente "sem dados" no campo correspondente.\n- Se voce nao conseguir consultar a internet, deixe claro em "observacoes" que a parte de mercado/sazonalidade e baseada em conhecimento geral e precisa de validacao local.\n\nFormato exato:\n{\n  "resumo": "...",\n  "comprarMais": [{"produto": "...", "motivo": "..."}],\n  "gastarMenos": [{"item": "...", "motivo": "..."}],\n  "produtosEmAlta": [{"produto": "...", "motivo": "..."}],\n  "sazonalidade": [{"produto": "...", "janela": "...", "nota": "..."}],\n  "alertas": ["..."],\n  "observacoes": ["..."]\n}`;
 }
 
+function extractJsonFromContent(content) {
+  if (!content) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(content);
+  } catch {
+    const fenced = content.match(/```json\s*([\s\S]*?)```/i);
+    if (fenced?.[1]) {
+      try {
+        return JSON.parse(fenced[1]);
+      } catch {
+        return null;
+      }
+    }
+
+    const start = content.indexOf("{");
+    const end = content.lastIndexOf("}");
+    if (start !== -1 && end !== -1 && end > start) {
+      try {
+        return JSON.parse(content.slice(start, end + 1));
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+}
+
 async function callOpenAi(prompt) {
   const apiKey = process.env.OPENAI_API_KEY;
 
@@ -418,6 +449,7 @@ async function callOpenAi(prompt) {
     body: JSON.stringify({
       model,
       temperature: 0.4,
+      response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
@@ -438,19 +470,16 @@ async function callOpenAi(prompt) {
 
   const content = payload?.choices?.[0]?.message?.content || "";
 
-  try {
-    return {
-      parsed: JSON.parse(content),
-      raw: content,
-      model: payload?.model || model,
-    };
-  } catch {
-    return {
-      parsed: null,
-      raw: content,
-      model: payload?.model || model,
-    };
+  if (!content) {
+    throw new ApiError("Resposta vazia da OpenAI", 502);
   }
+
+  const parsed = extractJsonFromContent(content);
+  return {
+    parsed,
+    raw: content,
+    model: payload?.model || model,
+  };
 }
 
 export async function buildAiReport({
