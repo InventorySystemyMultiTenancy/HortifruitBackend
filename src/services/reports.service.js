@@ -5,6 +5,7 @@ import {
   getDaysInMonth,
   startOfDay,
 } from "../utils/calculateFinalBalance.js";
+import { ApiError } from "../utils/apiError.js";
 
 function buildDateRange({ startDate, endDate, month }) {
   if (month) {
@@ -211,5 +212,354 @@ export async function buildReport({
     },
     netResult: netRevenue - totalCosts,
     closes: dailyCloses,
+  };
+}
+
+function formatYearMonth(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function buildScopedShopFilter({ shopId, shopIds }) {
+  if (shopId) {
+    return { shopId };
+  }
+
+  if (Array.isArray(shopIds) && shopIds.length) {
+    return { shopId: { in: shopIds } };
+  }
+
+  return {};
+}
+
+async function getCostsForScope({ companyId, shopId, shopIds, plantationId }) {
+  if (shopId || (Array.isArray(shopIds) && shopIds.length)) {
+    return prisma.cost.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        scope: "SHOP",
+        ...(shopId ? { shopId } : { shopId: { in: shopIds } }),
+      },
+    });
+  }
+
+  if (plantationId) {
+    return prisma.cost.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        scope: "PLANTATION",
+        plantationId,
+      },
+    });
+  }
+
+  return prisma.cost.findMany({
+    where: {
+      companyId,
+      isActive: true,
+    },
+  });
+}
+
+function getRangeCostsSummary(costs, rangeStart, rangeEnd) {
+  const totals = new Map();
+  const days = eachDayInRange(rangeStart, rangeEnd);
+
+  for (const cost of costs) {
+    if (!overlapsRange(cost, rangeStart, rangeEnd)) {
+      continue;
+    }
+
+    let total = 0;
+    for (const day of days) {
+      total += getCostDailyAmount(cost, day);
+    }
+
+    if (total <= 0) {
+      continue;
+    }
+
+    const current = totals.get(cost.name) || {
+      name: cost.name,
+      nature: cost.nature,
+      scope: cost.scope,
+      total: 0,
+    };
+
+    current.total += total;
+    totals.set(cost.name, current);
+  }
+
+  return [...totals.values()].sort((a, b) => b.total - a.total);
+}
+
+async function getDailyCloseItems({
+  companyId,
+  shopId,
+  shopIds,
+  startDate,
+  endDate,
+}) {
+  const scopedShopFilter = buildScopedShopFilter({ shopId, shopIds });
+
+  return prisma.dailyClose.findMany({
+    where: {
+      companyId,
+      ...scopedShopFilter,
+      closeDate: {
+        gte: startDate,
+        lte: endDate,
+      },
+    },
+    select: {
+      id: true,
+      closeDate: true,
+      items: {
+        select: {
+          productId: true,
+          kind: true,
+          amount: true,
+          quantity: true,
+          product: {
+            select: {
+              name: true,
+              unit: true,
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+function aggregateProductStats(closes) {
+  const stats = new Map();
+
+  for (const close of closes) {
+    for (const item of close.items || []) {
+      if (!item.productId) {
+        continue;
+      }
+
+      const current = stats.get(item.productId) || {
+        productId: item.productId,
+        name: item.product?.name || "Produto",
+        unit: item.product?.unit || null,
+        soldAmount: 0,
+        soldQuantity: 0,
+        lossAmount: 0,
+        lossQuantity: 0,
+      };
+
+      const amount = Number(item.amount || 0);
+      const quantity = Number(item.quantity || 0);
+
+      if (item.kind === "VENDA") {
+        current.soldAmount += amount;
+        current.soldQuantity += quantity;
+      }
+
+      if (item.kind === "PERDA") {
+        current.lossAmount += amount;
+        current.lossQuantity += quantity;
+      }
+
+      stats.set(item.productId, current);
+    }
+  }
+
+  return [...stats.values()].sort((a, b) => {
+    if (b.soldAmount === a.soldAmount) {
+      return b.soldQuantity - a.soldQuantity;
+    }
+    return b.soldAmount - a.soldAmount;
+  });
+}
+
+function buildAiPrompt({
+  region,
+  todaySummary,
+  monthSummary,
+  todayProducts,
+  monthProducts,
+  topCosts,
+}) {
+  const context = {
+    region: region || "Brasil",
+    today: todaySummary,
+    month: monthSummary,
+    productsToday: todayProducts,
+    productsMonth: monthProducts,
+    topCosts,
+  };
+
+  return `Voce e um analista de negocios de hortifruit. Responda em pt-BR, com foco pratico para compras e reducao de custos.\n\nDados internos (JSON):\n${JSON.stringify(
+    context,
+  )}\n\nRegras:\n- Responda SOMENTE com JSON valido.\n- Se nao houver dados suficientes, diga explicitamente "sem dados" no campo correspondente.\n- Se voce nao conseguir consultar a internet, deixe claro em "observacoes" que a parte de mercado/sazonalidade e baseada em conhecimento geral e precisa de validacao local.\n\nFormato exato:\n{\n  "resumo": "...",\n  "comprarMais": [{"produto": "...", "motivo": "..."}],\n  "gastarMenos": [{"item": "...", "motivo": "..."}],\n  "produtosEmAlta": [{"produto": "...", "motivo": "..."}],\n  "sazonalidade": [{"produto": "...", "janela": "...", "nota": "..."}],\n  "alertas": ["..."],\n  "observacoes": ["..."]\n}`;
+}
+
+async function callOpenAi(prompt) {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new ApiError("OPENAI_API_KEY nao configurada", 500);
+  }
+
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.4,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Voce analisa dados financeiros e sugere acoes objetivas para hortifruit.",
+        },
+        { role: "user", content: prompt },
+      ],
+    }),
+  });
+
+  const payload = await response.json();
+
+  if (!response.ok) {
+    const message = payload?.error?.message || "Falha ao chamar a OpenAI";
+    throw new ApiError(message, response.status || 502);
+  }
+
+  const content = payload?.choices?.[0]?.message?.content || "";
+
+  try {
+    return {
+      parsed: JSON.parse(content),
+      raw: content,
+      model: payload?.model || model,
+    };
+  } catch {
+    return {
+      parsed: null,
+      raw: content,
+      model: payload?.model || model,
+    };
+  }
+}
+
+export async function buildAiReport({
+  companyId,
+  shopId,
+  shopIds,
+  plantationId,
+  date,
+  month,
+  region,
+}) {
+  const referenceDate = date ? new Date(date) : new Date();
+  const monthValue = month || formatYearMonth(referenceDate);
+  const todayStart = startOfDay(referenceDate);
+  const todayEnd = endOfDay(referenceDate);
+  const monthRange = buildDateRange({ month: monthValue });
+
+  const [todayReport, monthReport, todayCloses, monthCloses, costs] =
+    await Promise.all([
+      buildReport({
+        companyId,
+        shopId,
+        shopIds,
+        plantationId,
+        startDate: todayStart,
+        endDate: todayEnd,
+      }),
+      buildReport({
+        companyId,
+        shopId,
+        shopIds,
+        plantationId,
+        month: monthValue,
+      }),
+      getDailyCloseItems({
+        companyId,
+        shopId,
+        shopIds,
+        startDate: todayStart,
+        endDate: todayEnd,
+      }),
+      getDailyCloseItems({
+        companyId,
+        shopId,
+        shopIds,
+        startDate: monthRange.startDate,
+        endDate: monthRange.endDate,
+      }),
+      getCostsForScope({ companyId, shopId, shopIds, plantationId }),
+    ]);
+
+  const todayProducts = aggregateProductStats(todayCloses).slice(0, 10);
+  const monthProducts = aggregateProductStats(monthCloses).slice(0, 15);
+  const topCosts = getRangeCostsSummary(
+    costs,
+    monthRange.startDate,
+    monthRange.endDate,
+  ).slice(0, 10);
+
+  const todaySummary = {
+    date: todayStart,
+    grossRevenue: todayReport.grossRevenue,
+    lossesTotal: todayReport.lossesTotal,
+    netRevenue: todayReport.netRevenue,
+    totalCosts: todayReport.costs.total,
+    netResult: todayReport.netResult,
+  };
+
+  const monthSummary = {
+    month: monthValue,
+    grossRevenue: monthReport.grossRevenue,
+    lossesTotal: monthReport.lossesTotal,
+    netRevenue: monthReport.netRevenue,
+    totalCosts: monthReport.costs.total,
+    netResult: monthReport.netResult,
+  };
+
+  const prompt = buildAiPrompt({
+    region,
+    todaySummary,
+    monthSummary,
+    todayProducts,
+    monthProducts,
+    topCosts,
+  });
+
+  const ai = await callOpenAi(prompt);
+
+  return {
+    filters: {
+      companyId,
+      shopId: shopId || null,
+      date: todayStart,
+      month: monthValue,
+      region: region || "Brasil",
+    },
+    summary: {
+      today: todaySummary,
+      month: monthSummary,
+    },
+    productStats: {
+      today: todayProducts,
+      month: monthProducts,
+    },
+    costHighlights: topCosts,
+    ai: ai.parsed || { raw: ai.raw },
+    aiMeta: {
+      model: ai.model,
+      parsed: Boolean(ai.parsed),
+    },
   };
 }

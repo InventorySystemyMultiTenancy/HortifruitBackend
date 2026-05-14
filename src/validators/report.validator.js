@@ -12,3 +12,16 @@ export const reportQuerySchema = z.object({
       .optional(),
   }),
 });
+
+export const reportAiSchema = z.object({
+  body: z.object({
+    companyId: z.string().min(1).optional(),
+    shopId: z.string().min(1).optional(),
+    date: z.coerce.date().optional(),
+    month: z
+      .string()
+      .regex(/^\d{4}-\d{2}$/)
+      .optional(),
+    region: z.string().min(2).optional(),
+  }),
+});
